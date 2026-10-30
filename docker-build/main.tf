@@ -214,18 +214,16 @@ module "code-server" {
   folder   = "${local.home}/${module.git-clone[0].folder_name}"
 }
 
-# Write the project's Infisical secrets to .env at the repository root on every start, using the
-# machine identity in ~/.infisical-identity/identity.env (created once per user).
-resource "coder_script" "infisical_env" {
-  count        = data.coder_workspace.me.start_count
-  agent_id     = coder_agent.main.id
-  display_name = "Infisical .env"
-  run_on_start = true
-  script       = <<-EOT
+# Write the project's Infisical secrets to .env at the repository root, using the machine identity
+# in ~/.infisical-identity/identity.env (created once per user). Runs on every start and from the
+# "Refresh .env" button on the dashboard.
+locals {
+  refresh_env_path   = "${local.home}/.local/bin/refresh-env"
+  refresh_env_script = <<-EOT
     #!/usr/bin/env bash
     set -euo pipefail
 
-    REPO_DIR="${local.home}/${module.git-clone[0].folder_name}"
+    REPO_DIR="${local.home}/${try(module.git-clone[0].folder_name, "")}"
     PROJECT_ID="${data.coder_parameter.infisical_project_id.value}"
     INF_ENV="${data.coder_parameter.infisical_env.value}"
     CREDS="$HOME/.infisical-identity/identity.env"
@@ -235,7 +233,7 @@ resource "coder_script" "infisical_env" {
       exit 0
     fi
     if [ ! -f "$CREDS" ]; then
-      echo "Missing $CREDS. Create it once with the machine identity's client ID and secret, then restart."
+      echo "Missing $CREDS. Create it once with the machine identity's client ID and secret, then restart or click Refresh .env."
       exit 0
     fi
 
@@ -258,6 +256,32 @@ resource "coder_script" "infisical_env" {
     mv "$REPO_DIR/.env.tmp" "$REPO_DIR/.env"
     echo "Wrote $REPO_DIR/.env from Infisical ($INF_ENV)."
   EOT
+}
+
+resource "coder_script" "infisical_env" {
+  count        = data.coder_workspace.me.start_count
+  agent_id     = coder_agent.main.id
+  display_name = "Infisical .env"
+  run_on_start = true
+  script       = <<-EOT
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$(dirname "${local.refresh_env_path}")"
+    echo "${base64encode(local.refresh_env_script)}" | base64 -d > "${local.refresh_env_path}"
+    chmod 755 "${local.refresh_env_path}"
+    exec "${local.refresh_env_path}"
+  EOT
+}
+
+# Dashboard button that re-exports .env from Infisical without restarting the workspace.
+resource "coder_app" "refresh_env" {
+  count        = data.coder_workspace.me.start_count
+  agent_id     = coder_agent.main.id
+  slug         = "refresh-env"
+  display_name = "Refresh .env"
+  icon         = "/emojis/1f511.png"
+  order        = 2
+  command      = "bash -c '${local.refresh_env_path}; echo; read -rp \"Press Enter to close.\"'"
 }
 
 # Claude Code in Remote Control server mode, inside tmux in the repository. First time per user:
