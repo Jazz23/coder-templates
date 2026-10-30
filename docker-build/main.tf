@@ -187,11 +187,15 @@ resource "coder_agent" "main" {
   }
 }
 
+# See https://registry.coder.com/modules/coder/git-config
 module "git-config" {
   count    = data.coder_workspace.me.start_count
   source   = "registry.coder.com/coder/git-config/coder"
   version  = "~> 1.0"
   agent_id = coder_agent.main.id
+
+  # Adds a "Git config user.email" parameter; left empty, commits use your Coder account's email.
+  allow_email_change = true
 }
 
 # See https://registry.coder.com/modules/coder/git-clone
