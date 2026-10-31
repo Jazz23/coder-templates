@@ -32,6 +32,11 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
+# The owner's GitHub login through Coder external auth, so gh is authenticated in every workspace.
+data "coder_external_auth" "github" {
+  id = "github"
+}
+
 # Parameters chosen when the workspace is created.
 
 data "coder_parameter" "repo_url" {
@@ -110,6 +115,10 @@ resource "coder_agent" "main" {
 
     # Crate registry cache in the persistent home volume; toolchain binaries stay in the image.
     CARGO_HOME = "${local.home}/.cargo"
+
+    # gh uses the external auth token instead of its own login. The token is read at build time,
+    # so restart the workspace if gh starts reporting it as expired.
+    GH_TOKEN = data.coder_external_auth.github.access_token
   }
 
   # The following metadata blocks are optional. They are used to display
