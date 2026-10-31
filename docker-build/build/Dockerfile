@@ -1,5 +1,5 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, and the Infisical CLI.
+# a headless Chromium, Claude Code, the Infisical CLI, and the GitHub CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -35,6 +35,15 @@ RUN install -m 0755 -d /etc/apt/keyrings \
       > /etc/apt/sources.list.d/docker.list \
  && apt-get update && apt-get install -y --no-install-recommends \
       docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+ && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI.
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
 # Node (LTS line) for Playwright, Claude Code and the Infisical CLI.
