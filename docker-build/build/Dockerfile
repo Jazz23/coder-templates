@@ -1,5 +1,5 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, the Infisical CLI, and the GitHub CLI.
+# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, and cron.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -23,7 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Base tools, plus what Rust crates commonly need to build (C toolchain, pkg-config, OpenSSL).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg sudo git tmux unzip jq less nano procps \
+      ca-certificates curl gnupg sudo git tmux unzip jq less nano procps cron \
       build-essential pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 

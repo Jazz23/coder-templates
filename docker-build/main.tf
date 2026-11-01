@@ -93,6 +93,11 @@ resource "coder_agent" "main" {
     sudo chown "$(id -u):$(id -g)" ~/.claude-auth ~/.infisical-identity
     mkdir -p ~/.cargo
 
+    # Restore the crontab saved at the last stop (crontabs live outside the home volume), then
+    # start cron.
+    [ -f ~/.crontab ] && crontab ~/.crontab
+    pgrep -x cron >/dev/null || sudo cron
+
     # Start the workspace's own Docker daemon and wait until it answers.
     if ! pgrep -x dockerd >/dev/null; then
       sudo sh -c 'dockerd > /var/log/dockerd.log 2>&1 &'
@@ -104,6 +109,9 @@ resource "coder_agent" "main" {
   EOT
 
   shutdown_script = <<-EOT
+    # Save the crontab to the home volume so `crontab -e` edits survive the container being replaced.
+    crontab -l > ~/.crontab 2>/dev/null || rm -f ~/.crontab
+
     # Drop Docker images, containers and build cache unused for a week, keeping recent cache warm.
     docker system prune -f --filter "until=168h" || true
     sudo sh -c 'kill "$(cat /var/run/docker.pid)"' 2>/dev/null || true
