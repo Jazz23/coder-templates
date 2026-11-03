@@ -1,5 +1,5 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, and cron.
+# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, and Blender.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -11,6 +11,8 @@ ARG NODE_MAJOR=24
 # bump them together.
 ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ARG BLENDER_VERSION=5.2.3
+ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -61,6 +63,21 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 # bun, for syntax-checking project JavaScript.
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+
+# Blender, for headless use (`blender -b`), from the official Linux build plus the X11/GL
+# libraries it loads even without a display. Fetched from a download.blender.org mirror, since
+# download.blender.org itself rejects plain curl; the checksum is Blender's published one.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xz-utils libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 \
+      libgl1 libegl1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL -o /tmp/blender.tar.xz \
+      "https://mirrors.ocf.berkeley.edu/blender/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+ && echo "${BLENDER_SHA256}  /tmp/blender.tar.xz" | sha256sum -c - \
+ && mkdir -p /opt/blender \
+ && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
+ && rm /tmp/blender.tar.xz \
+ && ln -s /opt/blender/blender /usr/local/bin/blender
 
 # Claude Code, the Infisical CLI, Playwright and its MCP server, then Chromium with the system
 # libraries it needs. Claude Code's auto-updater is off (DISABLE_AUTOUPDATER above): rebuild the
