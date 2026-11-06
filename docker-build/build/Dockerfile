@@ -1,5 +1,6 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, and Blender.
+# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, Blender, ffmpeg,
+# OpenAI Whisper, and the FilmCraft CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -13,6 +14,9 @@ ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 ARG BLENDER_VERSION=5.2.3
 ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
+ARG WHISPER_VERSION=20250625
+ARG FILMCRAFT_VERSION=0.17.1
+ARG FILMCRAFT_SHA256=397ae9fece559b37863b4b076af46a63b6e4387c35f781709e4efad14fe71ebe
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -78,6 +82,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
  && rm /tmp/blender.tar.xz \
  && ln -s /opt/blender/blender /usr/local/bin/blender
+
+# ffmpeg, plus Python for Whisper.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg python3 python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+
+# OpenAI Whisper (the `whisper` CLI) in its own virtualenv, since Ubuntu's system Python refuses
+# global pip installs. PyTorch comes from its CPU-only index: the workspace has no GPU, and the
+# default CUDA build would add several GB to the image. Triton, which Whisper requires but only
+# uses for CUDA kernels, is removed for the same reason (about 1 GB). Models download to
+# ~/.cache/whisper on first use, in the persistent home volume.
+RUN python3 -m venv /opt/whisper \
+ && /opt/whisper/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
+ && /opt/whisper/bin/pip install --no-cache-dir "openai-whisper==${WHISPER_VERSION}" \
+ && /opt/whisper/bin/pip uninstall -y triton \
+ && ln -s /opt/whisper/bin/whisper /usr/local/bin/whisper
+
+# The FilmCraft CLI (headless video editing and its MCP server), the prebuilt binary from the
+# official Linux release; it needs only libc. The checksum is the one GitHub lists for the asset.
+RUN curl -fsSL -o /tmp/filmcraft.tar.gz \
+      "https://github.com/storytold/filmcraft/releases/download/v${FILMCRAFT_VERSION}/filmcraft-${FILMCRAFT_VERSION}-linux-x86_64.tar.gz" \
+ && echo "${FILMCRAFT_SHA256}  /tmp/filmcraft.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/filmcraft.tar.gz -C /usr/local/bin --strip-components=2 \
+      "filmcraft-${FILMCRAFT_VERSION}-linux-x86_64/bin/filmcraft-cli" \
+ && rm /tmp/filmcraft.tar.gz
 
 # Claude Code, the Infisical CLI, Playwright and its MCP server, then Chromium with the system
 # libraries it needs. Claude Code's auto-updater is off (DISABLE_AUTOUPDATER above): rebuild the
