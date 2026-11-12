@@ -1,6 +1,6 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, Blender, ffmpeg,
-# and the FilmCraft CLI.
+# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, Blender, Godot,
+# ffmpeg, and the FilmCraft CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -14,6 +14,8 @@ ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 ARG BLENDER_VERSION=5.2.3
 ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
+ARG GODOT_VERSION=4.7.2
+ARG GODOT_SHA512=9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
 ARG FILMCRAFT_VERSION=0.17.1
 ARG FILMCRAFT_SHA256=397ae9fece559b37863b4b076af46a63b6e4387c35f781709e4efad14fe71ebe
 
@@ -81,6 +83,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
  && rm /tmp/blender.tar.xz \
  && ln -s /opt/blender/blender /usr/local/bin/blender
+
+# Godot, for headless use (`godot --headless`: scripts, imports, exports), the official Linux
+# editor build from GitHub; the checksum is the one in the release's SHA512-SUMS.txt. Export
+# templates are not included (over 1 GB); install them per project if you need to export.
+RUN curl -fsSL -o /tmp/godot.zip \
+      "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" \
+ && echo "${GODOT_SHA512}  /tmp/godot.zip" | sha512sum -c - \
+ && unzip -q /tmp/godot.zip -d /tmp/godot \
+ && install -m 0755 "/tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot \
+ && rm -rf /tmp/godot.zip /tmp/godot
 
 # ffmpeg.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
