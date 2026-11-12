@@ -1,6 +1,6 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, Python with pip, bun,
 # Playwright with a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, Git LFS,
-# cron, Blender, Godot, ffmpeg, and the FilmCraft CLI.
+# cron, Blender, Godot, ffmpeg, ImageMagick, and the FilmCraft CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -17,6 +17,8 @@ ARG BLENDER_VERSION=5.2.3
 ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
 ARG GODOT_VERSION=4.7.2
 ARG GODOT_SHA512=9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
+ARG IMAGEMAGICK_VERSION=7.1.2-35
+ARG IMAGEMAGICK_SHA256=f111044ed06b68cfb478df724c5a32d35145afa21073242f888d234a2f8cc002
 ARG FILMCRAFT_VERSION=0.17.1
 ARG FILMCRAFT_SHA256=397ae9fece559b37863b4b076af46a63b6e4387c35f781709e4efad14fe71ebe
 
@@ -119,6 +121,29 @@ RUN curl -fsSL -o /tmp/godot.zip \
 # ffmpeg.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
+
+# ImageMagick 7, the official Linux AppImage, unpacked into /opt/imagemagick since containers
+# have no FUSE to mount it (Ubuntu's own package is still ImageMagick 6, without `magick`). The
+# checksum is the one GitHub lists for the asset. The AppImage bundles ImageMagick's own libraries
+# but loads fontconfig from the system, and reads PDF and PostScript through Ghostscript. /usr/local/bin/magick is a wrapper that runs
+# the AppImage's launcher; the classic tool names link to it, and the launcher picks the tool by
+# the name it was called with.
+RUN apt-get update && apt-get install -y --no-install-recommends libfontconfig1 ghostscript \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL -o /tmp/imagemagick.AppImage \
+      "https://github.com/ImageMagick/ImageMagick/releases/download/${IMAGEMAGICK_VERSION}/ImageMagick-${IMAGEMAGICK_VERSION}-gcc-x86_64.AppImage" \
+ && echo "${IMAGEMAGICK_SHA256}  /tmp/imagemagick.AppImage" | sha256sum -c - \
+ && chmod +x /tmp/imagemagick.AppImage \
+ && cd /tmp && ./imagemagick.AppImage --appimage-extract >/dev/null \
+ && mv /tmp/squashfs-root /opt/imagemagick \
+ && chmod -R a+rX /opt/imagemagick \
+ && rm /tmp/imagemagick.AppImage \
+ && printf '#!/bin/sh\nAPPIMAGE=/opt/imagemagick ARGV0="$(basename "$0")" exec /opt/imagemagick/AppRun "$@"\n' \
+      > /usr/local/bin/magick \
+ && chmod 0755 /usr/local/bin/magick \
+ && for tool in convert identify mogrify composite compare montage stream conjure; do \
+      ln -s magick "/usr/local/bin/${tool}"; \
+    done
 
 # The FilmCraft CLI (headless video editing and its MCP server), the prebuilt binary from the
 # official Linux release; it needs only libc. The checksum is the one GitHub lists for the asset.
