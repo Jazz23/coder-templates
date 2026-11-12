@@ -1,6 +1,6 @@
-# Workspace image for the shared Coder template: Docker Engine, Rust, Node, bun, Playwright with
-# a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, cron, Blender, Godot,
-# ffmpeg, and the FilmCraft CLI.
+# Workspace image for the shared Coder template: Docker Engine, Rust, Node, Python with pip, bun,
+# Playwright with a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, Git LFS,
+# cron, Blender, Godot, ffmpeg, and the FilmCraft CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -8,6 +8,7 @@ FROM ubuntu:24.04
 
 ARG RUST_VERSION=1.99.1
 ARG NODE_MAJOR=24
+ARG PYTHON_VERSION=3.15
 # playwright is pinned to the build @playwright/mcp bundles, so both use the one Chromium;
 # bump them together.
 ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
@@ -28,9 +29,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Base tools, plus what Rust crates commonly need to build (C toolchain, pkg-config, OpenSSL).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg sudo git tmux unzip jq less nano procps cron \
+      ca-certificates curl gnupg sudo git git-lfs tmux unzip jq less nano procps cron \
       build-essential pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Git LFS hooks, set in /etc/gitconfig: a per-user `git lfs install` would write ~/.gitconfig,
+# which the home volume hides at runtime.
+RUN git lfs install --system
 
 # Docker Engine, CLI, Buildx and Compose. The daemon runs inside the workspace, which the Sysbox
 # runtime allows without a privileged container.
@@ -55,6 +60,23 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
+
+# Python, the newest release line, from the deadsnakes PPA, with pip from its bundled ensurepip.
+# `python`, `python3`, `pip` and `pip3` in /usr/local/bin point at it; Ubuntu's own
+# /usr/bin/python3 is left alone for the system tools that use it. Without sudo, `pip install`
+# falls back to ~/.local, in the persistent home volume; or use a venv (`python -m venv`).
+# The PPA's signing key is fetched from the Ubuntu keyserver by its full fingerprint.
+RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0xF23C5A6CF475977595C89F51BA6932366A755776" \
+    | gpg --dearmor -o /etc/apt/keyrings/deadsnakes.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+      > /etc/apt/sources.list.d/deadsnakes.list \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      "python${PYTHON_VERSION}" "python${PYTHON_VERSION}-venv" "python${PYTHON_VERSION}-dev" \
+ && rm -rf /var/lib/apt/lists/* \
+ && "python${PYTHON_VERSION}" -m ensurepip --upgrade \
+ && "python${PYTHON_VERSION}" -m pip install --no-cache-dir --upgrade pip \
+ && for name in python python3; do ln -sf "/usr/bin/python${PYTHON_VERSION}" "/usr/local/bin/${name}"; done \
+ && for name in pip pip3; do ln -sf "/usr/local/bin/pip${PYTHON_VERSION}" "/usr/local/bin/${name}"; done
 
 # Rust via rustup, installed system-wide. At runtime the template sets CARGO_HOME to
 # ~/.cargo so the crate registry cache lives in the persistent home volume, while the
@@ -133,6 +155,10 @@ RUN userdel -r ubuntu 2>/dev/null || true \
  && usermod -aG docker "${USER}" \
  && echo "${USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${USER}" \
  && chmod 0440 "/etc/sudoers.d/${USER}"
+
+# ~/.local/bin, where `pip install --user` puts commands, on PATH for every shell, not only the
+# login shells that ~/.profile covers.
+ENV PATH=/home/${USER}/.local/bin:$PATH
 
 USER ${USER}
 WORKDIR /home/${USER}
