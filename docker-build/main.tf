@@ -385,15 +385,18 @@ resource "docker_volume" "docker_volume" {
   }
 }
 
-# One image per user, shared by all of that user's workspaces and tagged by a hash of build/.
-# Editing the Dockerfile produces a new tag; keep_locally stops a workspace deletion from removing
-# an image the user's other workspaces still use.
+# One image per user and template version, shared by all of that user's workspaces on that version.
+# The Dockerfile installs the newest release of every tool, so the image is rebuilt (with the
+# TEMPLATE_VERSION build arg busting the layer cache) only when a workspace is updated to a newly
+# pushed template version. keep_locally stops a workspace deletion from removing an image the
+# user's other workspaces still use.
 resource "docker_image" "main" {
-  name = "coder-${local.username}:${substr(sha1(join("", [for f in sort(fileset(path.module, "build/**")) : filesha1("${path.module}/${f}")])), 0, 12)}"
+  name = "coder-${local.username}:${substr(sha1(data.coder_workspace.me.template_version), 0, 12)}"
   build {
     context = "./build"
     build_args = {
-      USER = local.username
+      TEMPLATE_VERSION = data.coder_workspace.me.template_version
+      USER             = local.username
     }
   }
   keep_locally = true

@@ -6,22 +6,11 @@
 # over that directory at runtime and would hide anything put there at build time.
 FROM ubuntu:24.04
 
-ARG RUST_VERSION=1.99.1
-ARG NODE_MAJOR=24
-ARG PYTHON_VERSION=3.15
-# playwright is pinned to the build @playwright/mcp bundles, so both use the one Chromium;
-# bump them together.
-ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
-ARG PLAYWRIGHT_MCP_VERSION=0.0.83
-ARG WRANGLER_VERSION=4.165.0
-ARG BLENDER_VERSION=5.2.3
-ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
-ARG GODOT_VERSION=4.7.2
-ARG GODOT_SHA512=9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65
-ARG IMAGEMAGICK_VERSION=7.1.2-35
-ARG IMAGEMAGICK_SHA256=f111044ed06b68cfb478df724c5a32d35145afa21073242f888d234a2f8cc002
-ARG FILMCRAFT_VERSION=0.17.1
-ARG FILMCRAFT_SHA256=397ae9fece559b37863b4b076af46a63b6e4387c35f781709e4efad14fe71ebe
+# Every tool is the newest release at build time; nothing is pinned. TEMPLATE_VERSION, the Coder
+# template version passed in by main.tf, is the only thing that triggers a rebuild: changing it
+# invalidates the cache for every RUN below, so a workspace picks up new releases when its owner
+# updates it to a newly pushed template version, and keeps its image until then.
+ARG TEMPLATE_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -59,12 +48,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
  && apt-get update && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
-# Node (LTS line) for Playwright, Claude Code and the Infisical CLI.
-RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+# Node, the current release line, for Playwright, Claude Code, Wrangler and the Infisical CLI.
+RUN curl -fsSL https://deb.nodesource.com/setup_current.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
 
-# Python, the newest release line, from the deadsnakes PPA, with pip from its bundled ensurepip.
+# Python, the newest stable release line in the deadsnakes PPA (it also carries the next release's
+# alphas and betas, which are skipped), with pip from its bundled ensurepip.
 # `python`, `python3`, `pip` and `pip3` in /usr/local/bin point at it; Ubuntu's own
 # /usr/bin/python3 is left alone for the system tools that use it. Without sudo, `pip install`
 # falls back to ~/.local, in the persistent home volume; or use a venv (`python -m venv`).
@@ -73,13 +63,19 @@ RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search
     | gpg --dearmor -o /etc/apt/keyrings/deadsnakes.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
       > /etc/apt/sources.list.d/deadsnakes.list \
- && apt-get update && apt-get install -y --no-install-recommends \
-      "python${PYTHON_VERSION}" "python${PYTHON_VERSION}-venv" "python${PYTHON_VERSION}-dev" \
+ && apt-get update \
+ && for py in $(apt-cache pkgnames python3. | grep -E '^python3\.[0-9]+$' | sort -V -r); do \
+      case "$(apt-cache show --no-all-versions "${py}" | sed -n 's/^Version: //p')" in \
+        *~*) ;; \
+        *) break ;; \
+      esac; \
+    done \
+ && apt-get install -y --no-install-recommends "${py}" "${py}-venv" "${py}-dev" \
  && rm -rf /var/lib/apt/lists/* \
- && "python${PYTHON_VERSION}" -m ensurepip --upgrade \
- && "python${PYTHON_VERSION}" -m pip install --no-cache-dir --upgrade pip \
- && for name in python python3; do ln -sf "/usr/bin/python${PYTHON_VERSION}" "/usr/local/bin/${name}"; done \
- && for name in pip pip3; do ln -sf "/usr/local/bin/pip${PYTHON_VERSION}" "/usr/local/bin/${name}"; done
+ && "${py}" -m ensurepip --upgrade \
+ && "${py}" -m pip install --no-cache-dir --upgrade pip \
+ && for name in python python3; do ln -sf "/usr/bin/${py}" "/usr/local/bin/${name}"; done \
+ && for name in pip pip3; do ln -sf "/usr/local/bin/pip${py#python}" "/usr/local/bin/${name}"; done
 
 # Rust via rustup, installed system-wide. At runtime the template sets CARGO_HOME to
 # ~/.cargo so the crate registry cache lives in the persistent home volume, while the
@@ -88,7 +84,7 @@ RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search
 # per-user step keeps the toolchain in a layer every user's image shares.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | CARGO_HOME=/usr/local/cargo sh -s -- -y --no-modify-path --profile minimal \
-        --default-toolchain "${RUST_VERSION}" --component rustfmt,clippy \
+        --default-toolchain stable --component rustfmt,clippy \
  && chown -R 1000:1000 /usr/local/rustup /usr/local/cargo
 
 # bun, for syntax-checking project JavaScript.
@@ -96,27 +92,32 @@ RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 
 # Blender, for headless use (`blender -b`), from the official Linux build plus the X11/GL
 # libraries it loads even without a display. Fetched from a download.blender.org mirror, since
-# download.blender.org itself rejects plain curl; the checksum is Blender's published one.
+# download.blender.org itself rejects plain curl: the newest Linux build in the newest release
+# folder that has one.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xz-utils libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 \
       libgl1 libegl1 \
  && rm -rf /var/lib/apt/lists/* \
- && curl -fsSL -o /tmp/blender.tar.xz \
-      "https://mirrors.ocf.berkeley.edu/blender/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
- && echo "${BLENDER_SHA256}  /tmp/blender.tar.xz" | sha256sum -c - \
+ && mirror=https://mirrors.ocf.berkeley.edu/blender/release \
+ && for dir in $(curl -fsSL "${mirror}/" | grep -o 'Blender[0-9.]*/' | sort -uV -r); do \
+      file="$(curl -fsSL "${mirror}/${dir}" | grep -o 'blender-[0-9.]*-linux-x64\.tar\.xz' | sort -uV | tail -n1)"; \
+      [ -n "${file}" ] && break; \
+    done \
+ && curl -fsSL -o /tmp/blender.tar.xz "${mirror}/${dir}${file}" \
  && mkdir -p /opt/blender \
  && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
  && rm /tmp/blender.tar.xz \
  && ln -s /opt/blender/blender /usr/local/bin/blender
 
 # Godot, for headless use (`godot --headless`: scripts, imports, exports), the official Linux
-# editor build from GitHub; the checksum is the one in the release's SHA512-SUMS.txt. Export
-# templates are not included (over 1 GB); install them per project if you need to export.
-RUN curl -fsSL -o /tmp/godot.zip \
-      "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" \
- && echo "${GODOT_SHA512}  /tmp/godot.zip" | sha512sum -c - \
+# editor build from GitHub's latest stable release. Export templates are not included (over 1 GB);
+# install them per project if you need to export. Here and below, the download is picked from the
+# latest release's assets by a loose name pattern, so a renamed asset doesn't break the build.
+RUN url="$(curl -fsSL https://api.github.com/repos/godotengine/godot/releases/latest \
+      | jq -r '[.assets[] | select(.name | test("_linux\\.x86_64\\.zip$"))][0].browser_download_url')" \
+ && curl -fsSL -o /tmp/godot.zip "${url}" \
  && unzip -q /tmp/godot.zip -d /tmp/godot \
- && install -m 0755 "/tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot \
+ && install -m 0755 /tmp/godot/Godot_*_linux.x86_64 /usr/local/bin/godot \
  && rm -rf /tmp/godot.zip /tmp/godot
 
 # ffmpeg.
@@ -125,15 +126,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 
 # ImageMagick 7, the official Linux AppImage, unpacked into /opt/imagemagick since containers
 # have no FUSE to mount it (Ubuntu's own package is still ImageMagick 6, without `magick`). The
-# checksum is the one GitHub lists for the asset. The AppImage bundles ImageMagick's own libraries
-# but loads fontconfig from the system, and reads PDF and PostScript through Ghostscript. /usr/local/bin/magick is a wrapper that runs
-# the AppImage's launcher; the classic tool names link to it, and the launcher picks the tool by
-# the name it was called with.
+# AppImage bundles ImageMagick's own libraries but loads fontconfig from the system, and reads PDF
+# and PostScript through Ghostscript. /usr/local/bin/magick is a wrapper that runs the AppImage's
+# launcher; the classic tool names link to it, and the launcher picks the tool by the name it was
+# called with.
 RUN apt-get update && apt-get install -y --no-install-recommends libfontconfig1 ghostscript \
  && rm -rf /var/lib/apt/lists/* \
- && curl -fsSL -o /tmp/imagemagick.AppImage \
-      "https://github.com/ImageMagick/ImageMagick/releases/download/${IMAGEMAGICK_VERSION}/ImageMagick-${IMAGEMAGICK_VERSION}-gcc-x86_64.AppImage" \
- && echo "${IMAGEMAGICK_SHA256}  /tmp/imagemagick.AppImage" | sha256sum -c - \
+ && url="$(curl -fsSL https://api.github.com/repos/ImageMagick/ImageMagick/releases/latest \
+      | jq -r '[.assets[] | select(.name | test("x86_64\\.AppImage$")) | select(.name | test("clang") | not)][0].browser_download_url')" \
+ && curl -fsSL -o /tmp/imagemagick.AppImage "${url}" \
  && chmod +x /tmp/imagemagick.AppImage \
  && cd /tmp && ./imagemagick.AppImage --appimage-extract >/dev/null \
  && mv /tmp/squashfs-root /opt/imagemagick \
@@ -147,24 +148,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends libfontconfig1 
     done
 
 # The FilmCraft CLI (headless video editing and its MCP server), the prebuilt binary from the
-# official Linux release; it needs only libc. The checksum is the one GitHub lists for the asset.
-RUN curl -fsSL -o /tmp/filmcraft.tar.gz \
-      "https://github.com/storytold/filmcraft/releases/download/v${FILMCRAFT_VERSION}/filmcraft-${FILMCRAFT_VERSION}-linux-x86_64.tar.gz" \
- && echo "${FILMCRAFT_SHA256}  /tmp/filmcraft.tar.gz" | sha256sum -c - \
- && tar -xzf /tmp/filmcraft.tar.gz -C /usr/local/bin --strip-components=2 \
-      "filmcraft-${FILMCRAFT_VERSION}-linux-x86_64/bin/filmcraft-cli" \
+# latest Linux release; it needs only libc.
+RUN url="$(curl -fsSL https://api.github.com/repos/storytold/filmcraft/releases/latest \
+      | jq -r '[.assets[] | select(.name | test("linux-x86_64\\.tar\\.gz$"))][0].browser_download_url')" \
+ && curl -fsSL -o /tmp/filmcraft.tar.gz "${url}" \
+ && tar -xzf /tmp/filmcraft.tar.gz -C /usr/local/bin --strip-components=2 --wildcards \
+      '*/bin/filmcraft-cli' \
  && rm /tmp/filmcraft.tar.gz
 
-# Claude Code, the Infisical CLI, Cloudflare's Wrangler CLI, Playwright and its MCP server, then
-# Chromium with the system libraries it needs. Claude Code's auto-updater is off
-# (DISABLE_AUTOUPDATER above): rebuild the image to update it, so every workspace runs the same
-# version.
+# Claude Code, the Infisical CLI, Cloudflare's Wrangler CLI, and the Playwright MCP server, then
+# Chromium with the system libraries it needs. The `playwright` command is the copy of Playwright
+# that @playwright/mcp bundles, so the CLI and the MCP server use the one Chromium. Claude Code's
+# auto-updater is off (DISABLE_AUTOUPDATER above): updating the workspace rebuilds the image with
+# the newest release instead.
 RUN npm install -g \
       @anthropic-ai/claude-code \
       @infisical/cli \
-      "wrangler@${WRANGLER_VERSION}" \
-      "playwright@${PLAYWRIGHT_VERSION}" \
-      "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+      wrangler \
+      @playwright/mcp \
+ && ln -s "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" /usr/local/bin/playwright \
  && playwright install --with-deps chromium \
  && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
  && npm cache clean --force \

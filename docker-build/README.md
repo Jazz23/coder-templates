@@ -65,7 +65,7 @@ This means, when the workspace restarts, any tools or files outside of the home 
 
 ### Editing the image
 
-Edit the `build/Dockerfile` and run `coder templates push` to update workspaces. The image will be rebuilt automatically when the Dockerfile changes.
+Edit the `build/Dockerfile` and run `coder templates push` to update workspaces. The Dockerfile pins no versions: every tool is the newest release at build time. The image is rebuilt only when a workspace is updated to a newly pushed template version, so pushing the template (even unchanged) is how workspaces get the latest tools.
 
 ## Difference from the standard Docker template
 
