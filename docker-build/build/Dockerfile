@@ -1,6 +1,6 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, Python with pip, bun,
 # Playwright with a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, Git LFS,
-# cron, Blender, Godot, ffmpeg, ImageMagick, and the FilmCraft CLI.
+# cron, Blender, Godot, ffmpeg, ImageMagick, the FilmCraft CLI, and Cloudflare's Wrangler CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -13,6 +13,7 @@ ARG PYTHON_VERSION=3.15
 # bump them together.
 ARG PLAYWRIGHT_VERSION=1.64.0-alpha-1790635538000
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ARG WRANGLER_VERSION=4.165.0
 ARG BLENDER_VERSION=5.2.3
 ARG BLENDER_SHA256=78486c018b4443efe5e75ab54c290ed8c15abafd249b862c2c9ce2530a918eec
 ARG GODOT_VERSION=4.7.2
@@ -154,12 +155,14 @@ RUN curl -fsSL -o /tmp/filmcraft.tar.gz \
       "filmcraft-${FILMCRAFT_VERSION}-linux-x86_64/bin/filmcraft-cli" \
  && rm /tmp/filmcraft.tar.gz
 
-# Claude Code, the Infisical CLI, Playwright and its MCP server, then Chromium with the system
-# libraries it needs. Claude Code's auto-updater is off (DISABLE_AUTOUPDATER above): rebuild the
-# image to update it, so every workspace runs the same version.
+# Claude Code, the Infisical CLI, Cloudflare's Wrangler CLI, Playwright and its MCP server, then
+# Chromium with the system libraries it needs. Claude Code's auto-updater is off
+# (DISABLE_AUTOUPDATER above): rebuild the image to update it, so every workspace runs the same
+# version.
 RUN npm install -g \
       @anthropic-ai/claude-code \
       @infisical/cli \
+      "wrangler@${WRANGLER_VERSION}" \
       "playwright@${PLAYWRIGHT_VERSION}" \
       "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
  && playwright install --with-deps chromium \
