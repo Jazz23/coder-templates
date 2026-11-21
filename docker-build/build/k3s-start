@@ -1,0 +1,33 @@
+#!/bin/sh
+# Start a single-node k3s cluster inside the workspace, logging to /var/log/k3s.log, and wait until
+# the node is Ready. Run as your user; it uses sudo.
+set -e
+
+if pgrep -f 'k3s server' >/dev/null; then
+  echo "k3s is already running."
+else
+  # With cgroup v2, the kubelet can't create its cgroups while processes sit in the container's
+  # root cgroup, so move them into a child cgroup and delegate every controller (the same step
+  # Docker's docker-in-docker image and k3d take).
+  if [ -f /sys/fs/cgroup/cgroup.controllers ] && [ ! -d /sys/fs/cgroup/init ]; then
+    sudo sh -c '
+      mkdir -p /sys/fs/cgroup/init
+      xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :
+      sed -e "s/ / +/g" -e "s/^/+/" < /sys/fs/cgroup/cgroup.controllers \
+        > /sys/fs/cgroup/cgroup.subtree_control
+    '
+  fi
+  sudo sh -c 'k3s server > /var/log/k3s.log 2>&1 &'
+fi
+
+# Ready means the node is up and the default service account exists, so pods can be created.
+printf 'Waiting for the k3s node to be Ready'
+for i in $(seq 1 120); do
+  if kubectl get nodes 2>/dev/null | grep -q ' Ready' \
+     && kubectl get serviceaccount default >/dev/null 2>&1; then
+    echo; kubectl get nodes; exit 0
+  fi
+  printf '.'; sleep 2
+done
+echo; echo "k3s did not become Ready within 4 minutes; see /var/log/k3s.log." >&2
+exit 1

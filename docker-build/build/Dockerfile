@@ -1,6 +1,7 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, Python with pip, bun,
-# Playwright with a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, Git LFS,
-# cron, Blender, Godot, ffmpeg, ImageMagick, the FilmCraft CLI, and Cloudflare's Wrangler CLI.
+# Playwright with a headless Chromium, Claude Code, OpenAI's Codex CLI, the Infisical CLI, the
+# GitHub CLI, Git LFS, cron, Blender, Godot, ffmpeg, ImageMagick, the FilmCraft CLI, Cloudflare's
+# Wrangler CLI, and k3s with kubectl.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -17,7 +18,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
-    DISABLE_AUTOUPDATER=1
+    DISABLE_AUTOUPDATER=1 \
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # Base tools, plus what Rust crates commonly need to build (C toolchain, pkg-config, OpenSSL).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -156,13 +158,33 @@ RUN url="$(curl -fsSL https://api.github.com/repos/storytold/filmcraft/releases/
       '*/bin/filmcraft-cli' \
  && rm /tmp/filmcraft.tar.gz
 
-# Claude Code, the Infisical CLI, Cloudflare's Wrangler CLI, and the Playwright MCP server, then
-# Chromium with the system libraries it needs. The `playwright` command is the copy of Playwright
-# that @playwright/mcp bundles, so the CLI and the MCP server use the one Chromium. Claude Code's
-# auto-updater is off (DISABLE_AUTOUPDATER above): updating the workspace rebuilds the image with
-# the newest release instead.
+# k3s, a single-binary Kubernetes, from its latest GitHub release, plus kubectl's latest stable
+# release from upstream. (kubectl is not linked to k3s: run as a regular user, the k3s binary
+# unpacks some 200 MB into ~/.rancher in the home volume.) k3s isn't started automatically: run
+# `k3s-start` when you need a cluster; Sysbox lets it run inside the workspace like dockerd. Its
+# config makes the kubeconfig it writes readable, and KUBECONFIG above points kubectl at it, so
+# kubectl works without sudo; kube-proxy is told to leave the host's conntrack limit alone, which
+# a container may not change.
+RUN url="$(curl -fsSL https://api.github.com/repos/k3s-io/k3s/releases/latest \
+      | jq -r '[.assets[] | select(.name == "k3s")][0].browser_download_url')" \
+ && curl -fsSL -o /usr/local/bin/k3s "${url}" \
+ && chmod 0755 /usr/local/bin/k3s \
+ && curl -fsSL -o /usr/local/bin/kubectl \
+      "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+ && chmod 0755 /usr/local/bin/kubectl \
+ && mkdir -p /etc/rancher/k3s \
+ && printf 'write-kubeconfig-mode: "0644"\nkube-proxy-arg:\n  - conntrack-max-per-core=0\n' \
+      > /etc/rancher/k3s/config.yaml
+COPY k3s-start /usr/local/bin/k3s-start
+
+# Claude Code, OpenAI's Codex CLI, the Infisical CLI, Cloudflare's Wrangler CLI, and the
+# Playwright MCP server, then Chromium with the system libraries it needs. The `playwright` command
+# is the copy of Playwright that @playwright/mcp bundles, so the CLI and the MCP server use the one
+# Chromium. Claude Code's auto-updater is off (DISABLE_AUTOUPDATER above): updating the workspace
+# rebuilds the image with the newest release instead.
 RUN npm install -g \
       @anthropic-ai/claude-code \
+      @openai/codex \
       @infisical/cli \
       wrangler \
       @playwright/mcp \
