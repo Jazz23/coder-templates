@@ -89,6 +89,11 @@ resource "coder_agent" "main" {
       touch ~/.init_done
     fi
 
+    # New interactive shells open in the cloned repository. Done here rather than with the agent's
+    # deprecated `dir`, which breaks Coder Desktop file sync when not $HOME.
+    sed -i '/# coder-repo-cd$/d' ~/.bashrc
+    echo '[ "$PWD" = "$HOME" ] && cd "${local.home}/${try(module.git-clone[0].folder_name, "")}" # coder-repo-cd' >> ~/.bashrc
+
     # Docker creates volume mount points as root; hand the shared per-user ones to this user.
     sudo chown "$(id -u):$(id -g)" ~/.claude-auth ~/.infisical-identity
     mkdir -p ~/.cargo

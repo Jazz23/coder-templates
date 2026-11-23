@@ -172,6 +172,17 @@ RUN npm install -g \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 
+# kubectl, the latest stable release, and k3d.
+RUN curl -fsSL -o /tmp/kubectl \
+      "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+ && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+ && rm /tmp/kubectl \
+ && curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+# pnpm
+
+RUN curl -fsSL https://get.pnpm.io | sh -
+
 # The workspace user, named after the Coder workspace owner. Ubuntu's image ships a "ubuntu" user
 # with UID 1000; replace it with ours at the same UID. The user gets passwordless sudo (needed to
 # start dockerd) and membership in the docker group.
