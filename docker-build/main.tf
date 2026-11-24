@@ -95,7 +95,7 @@ resource "coder_agent" "main" {
     echo '[ "$PWD" = "$HOME" ] && cd "${local.home}/${try(module.git-clone[0].folder_name, "")}" # coder-repo-cd' >> ~/.bashrc
 
     # Docker creates volume mount points as root; hand the shared per-user ones to this user.
-    sudo chown "$(id -u):$(id -g)" ~/.claude-auth ~/.infisical-identity
+    sudo chown "$(id -u):$(id -g)" ~/.claude-auth ~/.infisical-identity ~/.aws
     mkdir -p ~/.cargo
 
     # Restore the crontab saved at the last stop (crontabs live outside the home volume), then
@@ -454,6 +454,13 @@ resource "docker_container" "workspace" {
   volumes {
     container_path = "${local.home}/.infisical-identity"
     volume_name    = "coder-infisical-${data.coder_workspace_owner.me.id}"
+    read_only      = false
+  }
+
+  # Per user, shared by all your workspaces: AWS CLI credentials, config and SSO token cache.
+  volumes {
+    container_path = "${local.home}/.aws"
+    volume_name    = "coder-aws-${data.coder_workspace_owner.me.id}"
     read_only      = false
   }
 

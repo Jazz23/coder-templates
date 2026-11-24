@@ -1,6 +1,6 @@
 # Workspace image for the shared Coder template: Docker Engine, Rust, Node, Python with pip, bun,
 # Playwright with a headless Chromium, Claude Code, the Infisical CLI, the GitHub CLI, Git LFS,
-# cron, Blender, Godot, ffmpeg, ImageMagick, the FilmCraft CLI, and Cloudflare's Wrangler CLI.
+# cron, Blender, Godot, ffmpeg, ImageMagick, the FilmCraft CLI, Cloudflare's Wrangler CLI, and the AWS CLI.
 #
 # Everything is installed OUTSIDE the user's home, because the workspace's home volume is mounted
 # over that directory at runtime and would hide anything put there at build time.
@@ -178,6 +178,12 @@ RUN curl -fsSL -o /tmp/kubectl \
  && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
  && rm /tmp/kubectl \
  && curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+# AWS CLI v2. Its login (~/.aws) lives in a per-user volume mounted by main.tf.
+RUN curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" \
+ && unzip -q /tmp/awscliv2.zip -d /tmp \
+ && /tmp/aws/install \
+ && rm -rf /tmp/awscliv2.zip /tmp/aws
 
 # pnpm
 
